@@ -15,6 +15,8 @@ The design follows the paper principle that multi-agent behavior can be built
 with normal tool calls and specialized agents, without complex framework-level
 message broker patterns.
 
+This system takes a topic you can it where implemented in the code and it will find papers realated to the topic. Then summarizes them and give you a report with strength and weakness. lastly it outputs the links to the papers it used to show they are real. 
+
 ## Run
 
 ```powershell

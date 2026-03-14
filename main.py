@@ -6,68 +6,104 @@ Selected use case:
 
 from orchestral import Agent, define_tool
 from orchestral.llm import Ollama
+from urllib.parse import quote_plus
+from urllib.request import urlopen
+import xml.etree.ElementTree as ET
 
 MODEL_NAME = "devstral-small-2:24b-cloud"
 
 
-@define_tool()
-def literature_search_tool(topic: str) -> str:
-    """Return a small, structured candidate-paper list for a topic."""
-    # In a production system this would call arXiv, Semantic Scholar, or CrossRef.
-    papers = [
-        {
-            "title": "A Survey of Multi-Agent LLM Systems",
-            "year": 2024,
-            "focus": "Architectures, communication patterns, and coordination",
-        },
-        {
-            "title": "Role-Based Agent Collaboration in Research Automation",
-            "year": 2024,
-            "focus": "Task decomposition and manager-worker orchestration",
-        },
-        {
-            "title": "Evaluation of Agent Tool-Use Reliability",
-            "year": 2025,
-            "focus": "Tool-calling accuracy and reproducibility",
-        },
-    ]
-    lines = [f"Topic: {topic}", "Candidate papers:"]
-    for idx, paper in enumerate(papers, start=1):
-        lines.append(
-            f"{idx}. {paper['title']} ({paper['year']}) - {paper['focus']}"
+def as_text(value: object) -> str:
+    """Convert agent/tool responses to plain text for safe composition."""
+    if isinstance(value, str):
+        return value
+    content = getattr(value, "content", None)
+    if isinstance(content, str):
+        return content
+    return str(value)
+
+
+def fetch_arxiv_papers(topic: str, max_results: int = 5) -> str:
+    """Fetch real paper metadata from the public arXiv API."""
+    query = quote_plus(topic)
+    url = (
+        "https://export.arxiv.org/api/query?"
+        f"search_query=all:{query}&start=0&max_results={max_results}"
+    )
+
+    try:
+        with urlopen(url, timeout=20) as response:
+            raw_xml = response.read()
+    except Exception as exc:
+        return (
+            "arXiv API error: unable to fetch papers right now. "
+            f"Details: {exc}"
         )
+
+    try:
+        root = ET.fromstring(raw_xml)
+    except ET.ParseError as exc:
+        return f"arXiv API parse error: {exc}"
+
+    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    entries = root.findall("atom:entry", ns)
+
+    lines = [f"Topic: {topic}", "Candidate papers from arXiv API:"]
+    if not entries:
+        lines.append("No results found.")
+        return "\n".join(lines)
+
+    for idx, entry in enumerate(entries, start=1):
+        title = (entry.findtext("atom:title", default="", namespaces=ns) or "").strip()
+        summary = (
+            entry.findtext("atom:summary", default="", namespaces=ns) or ""
+        ).strip()
+        published = (
+            entry.findtext("atom:published", default="", namespaces=ns) or ""
+        ).strip()
+        year = published[:4] if len(published) >= 4 else "Unknown"
+
+        authors = [
+            (author.findtext("atom:name", default="", namespaces=ns) or "").strip()
+            for author in entry.findall("atom:author", ns)
+        ]
+        authors_text = ", ".join(a for a in authors if a) or "Unknown authors"
+
+        link = ""
+        for candidate in entry.findall("atom:link", ns):
+            href = candidate.attrib.get("href", "")
+            if "arxiv.org/abs/" in href:
+                link = href
+                break
+        if not link:
+            link = (
+                entry.findtext("atom:id", default="", namespaces=ns) or ""
+            ).strip()
+
+        lines.append(f"{idx}. {title} ({year})")
+        lines.append(f"   Authors: {authors_text}")
+        lines.append(f"   Link: {link}")
+        lines.append(f"   Abstract: {summary[:280]}...")
+
     return "\n".join(lines)
 
 
 @define_tool()
+def literature_search_tool(topic: str) -> str:
+    """Fetch real candidate papers from arXiv for a topic."""
+    return fetch_arxiv_papers(topic=topic, max_results=5)
+
+
+@define_tool()
 def paper_analysis_tool(paper_list_text: str) -> str:
-    """Extract findings from the candidate-paper list text."""
-    analysis = [
-        "Main findings:",
-        "1. Manager-worker coordination is the dominant multi-agent pattern.",
-        "2. Specialized tool sets improve quality and reduce prompt ambiguity.",
-        "3. Reproducibility improves when tool calls are explicit and logged.",
-        "4. Cost and context limits remain key constraints in long workflows.",
-        "Evidence source text:",
-        paper_list_text,
-    ]
-    return "\n".join(analysis)
+    """Pass the real paper list to the LLM for analysis."""
+    return paper_list_text
 
 
 @define_tool()
 def summary_writer_tool(analysis_text: str) -> str:
-    """Generate a short final report from analysis output."""
-    return "\n".join(
-        [
-            "Final report:",
-            "This multi-agent workflow uses hierarchical orchestration.",
-            "A manager agent delegates literature search and analysis to specialized worker agents.",
-            "The manager then composes a final summary with explicit traceable steps.",
-            "",
-            "Detailed analysis:",
-            analysis_text,
-        ]
-    )
+    """Pass the analysis to the LLM to write a final report."""
+    return analysis_text
 
 
 search_agent = Agent(
@@ -83,8 +119,10 @@ analysis_agent = Agent(
     llm=Ollama(model=MODEL_NAME),
     tools=[paper_analysis_tool],
     system_prompt=(
-        "You are an analysis specialist. "
-        "Use paper_analysis_tool to extract clear findings and limitations."
+        "You are a research analysis specialist. "
+        "Call paper_analysis_tool to retrieve the paper list, then write a "
+        "detailed analysis of those specific papers: key themes, findings, "
+        "strengths, and limitations. Base everything on the actual papers provided."
     ),
 )
 
@@ -93,7 +131,9 @@ summary_agent = Agent(
     tools=[summary_writer_tool],
     system_prompt=(
         "You are a scientific writing specialist. "
-        "Use summary_writer_tool to produce a concise, submission-ready report."
+        "Call summary_writer_tool to retrieve the analysis, then write a concise "
+        "final report covering: what the papers say, key strengths, key weaknesses, "
+        "and open questions in the field. Base everything on the actual analysis provided."
     ),
 )
 
@@ -101,22 +141,43 @@ summary_agent = Agent(
 @define_tool()
 def run_search_agent(topic: str) -> str:
     """Invoke the search worker agent."""
-    return search_agent.run(f"Find candidate papers for: {topic}")
+    return run_search_worker(topic)
+
+
+def run_search_worker(topic: str) -> str:
+    """Search worker implementation."""
+    # Deterministic path: always fetch real citations from arXiv API.
+    return fetch_arxiv_papers(topic=topic, max_results=5)
 
 
 @define_tool()
 def run_analysis_agent(search_output: str) -> str:
     """Invoke the analysis worker agent."""
-    return analysis_agent.run(
-        "Analyze this candidate paper list and extract findings:\n" + search_output
+    return run_analysis_worker(search_output)
+
+
+def run_analysis_worker(search_output: str) -> str:
+    """Analysis worker implementation."""
+    return as_text(
+        analysis_agent.run(
+            "Analyze this candidate paper list and extract findings:\n"
+            + as_text(search_output)
+        )
     )
 
 
 @define_tool()
 def run_summary_agent(analysis_output: str) -> str:
     """Invoke the summary worker agent."""
-    return summary_agent.run(
-        "Write a final report from this analysis:\n" + analysis_output
+    return run_summary_worker(analysis_output)
+
+
+def run_summary_worker(analysis_output: str) -> str:
+    """Summary worker implementation."""
+    return as_text(
+        summary_agent.run(
+            "Write a final report from this analysis:\n" + as_text(analysis_output)
+        )
     )
 
 
@@ -135,14 +196,25 @@ manager_agent = Agent(
 
 
 def develop_use_case(topic: str) -> str:
-    """Execute the selected Paper 2 multi-agent use case end-to-end."""
-    return manager_agent.run(
-        f"Develop the selected use case for topic: {topic}. "
-        "Show the final report and brief trace of worker delegation."
+    """Execute the full multi agent workflow for the given topic and return the final report."""
+    search_output = as_text(run_search_worker(topic))
+    analysis_output = as_text(run_analysis_worker(search_output))
+    summary_output = as_text(run_summary_worker(analysis_output))
+
+    return (
+        "Final report and trace\n"
+        "======================\n"
+        f"{summary_output}\n\n"
+        "Delegation trace:\n"
+        "1) Search worker -> arXiv API\n"
+        "2) Analysis worker -> findings extraction\n"
+        "3) Summary worker -> final synthesis\n\n"
+        "Raw search evidence:\n"
+        f"{search_output}"
     )
 
 
 if __name__ == "__main__":
-    selected_topic = "AI multi-agent systems for scientific research workflows"
+    selected_topic = "large language model hallucination detection" # change this topic to explore different areas and get different results
     output = develop_use_case(selected_topic)
     print(output)
