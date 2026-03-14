@@ -11,11 +11,11 @@ This project develops that use case as a manager worker multi agent system:
 - `Analysis agent`: extracts key findings from search output.
 - `Summary agent`: writes the final report.
 
-The design follows the paper principle that multi-agent behavior can be built
-with normal tool calls and specialized agents, without complex framework-level
+The design follows the paper principle that multi agent behavior can be built
+with normal tool calls and specialized agents, without complex framework level
 message broker patterns.
 
-This system takes a topic you can it where implemented in the code and it will find papers realated to the topic. Then summarizes them and give you a report with strength and weakness. lastly it outputs the links to the papers it used to show they are real. 
+This system takes a topic you can change the topic where commented in the code and it will find papers realated to the topic. Then summarizes them and give you a report with strength and weakness. lastly it outputs the links to the papers it used to show they are real. 
 
 ## Run
 

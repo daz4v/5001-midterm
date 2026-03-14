@@ -1,7 +1,7 @@
 """Paper 2 use case development: Multi-Agent Orchestration (Section 8.2.1).
 
 Selected use case:
-- Hierarchical coordination where a manager agent delegates to specialized workers.
+Hierarchical coordination where a manager agent delegates to specialized workers.
 """
 
 from orchestral import Agent, define_tool
@@ -140,7 +140,7 @@ summary_agent = Agent(
 
 @define_tool()
 def run_search_agent(topic: str) -> str:
-    """Invoke the search worker agent."""
+    """Runs the search worker agent."""
     return run_search_worker(topic)
 
 
@@ -152,7 +152,7 @@ def run_search_worker(topic: str) -> str:
 
 @define_tool()
 def run_analysis_agent(search_output: str) -> str:
-    """Invoke the analysis worker agent."""
+    """Runs the analysis worker agent."""
     return run_analysis_worker(search_output)
 
 
@@ -168,7 +168,7 @@ def run_analysis_worker(search_output: str) -> str:
 
 @define_tool()
 def run_summary_agent(analysis_output: str) -> str:
-    """Invoke the summary worker agent."""
+    """Runs the summary worker agent."""
     return run_summary_worker(analysis_output)
 
 
@@ -215,6 +215,6 @@ def develop_use_case(topic: str) -> str:
 
 
 if __name__ == "__main__":
-    selected_topic = "large language model hallucination detection" # change this topic to explore different areas and get different results
+    selected_topic = "large language model hallucination detection" # Change this topic to explore different areas and get different results
     output = develop_use_case(selected_topic)
     print(output)
