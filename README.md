@@ -18,9 +18,9 @@ This system takes a topic you can change the topic where commented in the code a
 
 ## Run
 
-To run in VSC just run the file or hit the run button
-To run in command run it the normal way you'd run files
-Below is my way to run it
+To run in VSC just run the file or hit the run button  
+To run in command run it the normal way you'd run files  
+Below is my way to run it  
 ```powershell
 c:/1Code/cs5001/5001-midterm/.venv/Scripts/python.exe main.py
 ```
